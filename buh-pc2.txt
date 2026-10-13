@@ -1,0 +1,99 @@
+name: Build Buh PC
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build EXE
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          mkdir winappbuh
+          cp buh.html winappbuh/index.html
+          cp buh-icon2.png winappbuh/icon.png
+          cd winappbuh
+          cat > main.js <<'EOF'
+          const { app, BrowserWindow, Menu, session } = require('electron');
+          const path = require('path');
+          function attachMenu(contents) {
+            contents.on('context-menu', (event, params) => {
+              const f = params.editFlags;
+              const items = [];
+              if (params.misspelledWord && params.dictionarySuggestions.length) {
+                params.dictionarySuggestions.slice(0, 5).forEach((s) => {
+                  items.push({ label: s, click: () => contents.replaceMisspelling(s) });
+                });
+                items.push({ type: 'separator' });
+              }
+              items.push(
+                { role: 'undo', label: 'გაუქმება', enabled: f.canUndo },
+                { role: 'redo', label: 'გამეორება', enabled: f.canRedo },
+                { type: 'separator' },
+                { role: 'cut', label: 'ამოჭრა', enabled: f.canCut },
+                { role: 'copy', label: 'კოპირება', enabled: f.canCopy },
+                { role: 'paste', label: 'ჩასმა', enabled: f.canPaste },
+                { role: 'selectAll', label: 'ყველას მონიშვნა', enabled: f.canSelectAll },
+                { type: 'separator' },
+                { label: 'განახლება', accelerator: 'CmdOrCtrl+R', click: () => contents.reload() },
+                { role: 'zoomIn', label: 'გადიდება' },
+                { role: 'zoomOut', label: 'დაპატარავება' },
+                { role: 'resetZoom', label: 'ზომა 100%' }
+              );
+              Menu.buildFromTemplate(items).popup({ window: BrowserWindow.fromWebContents(contents) || undefined });
+            });
+          }
+          app.on('web-contents-created', (event, contents) => {
+            if (contents.getType() === 'window') attachMenu(contents);
+          });
+          function createWindow() {
+            const allowed = ['clipboard-read', 'clipboard-sanitized-write'];
+            session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => cb(allowed.includes(permission)));
+            session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed.includes(permission));
+            const icon = path.join(__dirname, 'icon.png');
+            const win = new BrowserWindow({
+              width: 1280,
+              height: 860,
+              autoHideMenuBar: true,
+              backgroundColor: '#f3f1fb',
+              icon: icon
+            });
+            win.webContents.setWindowOpenHandler(() => ({
+              action: 'allow',
+              overrideBrowserWindowOptions: { autoHideMenuBar: true, icon: icon }
+            }));
+            win.loadFile(path.join(__dirname, 'index.html'));
+          }
+          app.whenReady().then(createWindow);
+          app.on('window-all-closed', () => app.quit());
+          EOF
+          cat > package.json <<'EOF'
+          {
+            "name": "lab-hub",
+            "version": "1.0.0",
+            "description": "Buhgalteria",
+            "author": "Buhgalteria",
+            "main": "main.js",
+            "build": {
+              "appId": "ge.gtu.buh",
+              "productName": "Buhgalteria",
+              "files": ["main.js", "index.html", "icon.png"],
+              "win": {
+                "icon": "icon.png",
+                "target": ["nsis", "portable"]
+              }
+            }
+          }
+          EOF
+          npm i -D electron@31 electron-builder@24
+          npx electron-builder --win --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: buh-exe
+          path: winappbuh/dist/*.exe
